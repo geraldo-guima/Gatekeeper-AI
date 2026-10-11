@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GateKeeper AI - Painel de Testes</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-slate-900 text-slate-100 min-h-screen p-6 font-sans">
+    <div class="max-w-4xl mx-auto space-y-6">
+      <!-- Cabeçalho -->
+      <header
+        class="border-b border-slate-700 pb-4 flex justify-between items-center"
+      >
+        <div>
+          <h1 class="text-2xl font-bold text-indigo-400">🛡️ GateKeeper AI</h1>
+          <p class="text-slate-400 text-sm">
+            Validação de Risco de Autenticação em Tempo Real
+          </p>
+        </div>
+        <span
+          class="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-semibold"
+        >
+          SISTEMA OPERACIONAL
+        </span>
+      </header>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Formulário de Cadastro e Login -->
+        <div
+          class="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4"
+        >
+          <h2 class="text-lg font-semibold text-slate-200">Autenticação</h2>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1"
+              >E-mail</label
+            >
+            <input
+              id="email"
+              type="email"
+              value="usuario@teste.com"
+              class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1"
+              >Senha (Mín. 8 caracteres, 1 Maiúscula, 1 Número, 1
+              Especial)</label
+            >
+            <input
+              id="password"
+              type="password"
+              value="Senha@123"
+              class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1"
+              >Código do País (Simulação do Risco da IA)</label
+            >
+            <select
+              id="codigoPais"
+              class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="1">1 - Brasil (Padrão / Risco Baixo)</option>
+              <option value="55">55 - Internacional (Risco Médio/Alto)</option>
+              <option value="99">
+                99 - Localização Anômala (Forçar Risco Alto / 2FA)
+              </option>
+            </select>
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button
+              onclick="cadastrar()"
+              class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium py-2 rounded text-sm transition"
+            >
+              1. Cadastrar
+            </button>
+            <button
+              onclick="login()"
+              class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded text-sm transition"
+            >
+              2. Entrar (Login)
+            </button>
+          </div>
+        </div>
+
+        <!-- Resposta da API / Status do Risco -->
+        <div
+          class="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4 flex flex-col justify-between"
+        >
+          <div>
+            <h2 class="text-lg font-semibold text-slate-200 mb-2">
+              Resultado da Análise
+            </h2>
+            <div
+              id="statusBadge"
+              class="p-3 rounded-lg bg-slate-900 border border-slate-700 text-slate-400 text-sm"
+            >
+              Aguardando requisição...
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1"
+              >Resposta JSON do Servidor:</label
+            >
+            <pre
+              id="jsonOutput"
+              class="bg-slate-900 p-3 rounded text-xs text-emerald-400 font-mono overflow-x-auto max-h-48 border border-slate-700"
+            >
+{ "status": "idle" }</pre
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      async function cadastrar() {
+        const email = document.getElementById("email").value;
+        const password = document.getElementById("password").value;
+        const output = document.getElementById("jsonOutput");
+        const badge = document.getElementById("statusBadge");
+
+        try {
+          const res = await fetch("/api/auth/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          const data = await res.json();
+          output.textContent = JSON.stringify(data, null, 2);
+
+          if (res.status === 201) {
+            badge.className =
+              "p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-sm";
+            badge.innerHTML =
+              "<strong>✅ Cadastrado com Sucesso!</strong> Agora clique em Entrar.";
+          } else {
+            badge.className =
+              "p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm";
+            badge.innerHTML = `<strong>⚠️ Erro:</strong> ${data.error || "Falha ao cadastrar."}`;
+          }
+        } catch (err) {
+          output.textContent = JSON.stringify({ error: err.message }, null, 2);
+        }
+      }
+
+      async function login() {
+        const email = document.getElementById("email").value;
+        const password = document.getElementById("password").value;
+        const codigoPais = parseInt(
+          document.getElementById("codigoPais").value,
+        );
+        const output = document.getElementById("jsonOutput");
+        const badge = document.getElementById("statusBadge");
+
+        try {
+          const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password, codigoPais }),
+          });
+
+          const data = await res.json();
+          output.textContent = JSON.stringify(data, null, 2);
+
+          if (res.status === 200) {
+            badge.className =
+              "p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-sm";
+            badge.innerHTML =
+              "<strong>🔓 Acesso Concedido!</strong> Risco Baixo avaliado pela IA.";
+          } else if (res.status === 202) {
+            badge.className =
+              "p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm";
+            badge.innerHTML =
+              "<strong>🛡️ 2FA Requerido!</strong> A IA detectou Risco Alto nesta autenticação.";
+          } else {
+            badge.className =
+              "p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm";
+            badge.innerHTML = `<strong>❌ Bloqueado/Recusado:</strong> ${data.error || "Credenciais inválidas"}`;
+          }
+        } catch (err) {
+          output.textContent = JSON.stringify({ error: err.message }, null, 2);
+        }
+      }
+    </script>
+  </body>
+</html>

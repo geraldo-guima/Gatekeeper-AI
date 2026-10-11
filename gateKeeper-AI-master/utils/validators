@@ -1,0 +1,23 @@
+function validatePassword(password) {
+  if (!password || password.length < 8) {
+    return { valid: false, message: 'A senha deve conter no mínimo 8 caracteres.' };
+  }
+
+  const hasUpperCase = /[A-Z]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+  const hasSpecialChar = /[@#$%^&*!_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+
+  if (!hasUpperCase) {
+    return { valid: false, message: 'A senha deve conter pelo menos uma letra maiúscula.' };
+  }
+  if (!hasNumber) {
+    return { valid: false, message: 'A senha deve conter pelo menos um número.' };
+  }
+  if (!hasSpecialChar) {
+    return { valid: false, message: 'A senha deve conter pelo menos um caractere especial (ex: @, #, $, %).' };
+  }
+
+  return { valid: true };
+}
+
+module.exports = { validatePassword };

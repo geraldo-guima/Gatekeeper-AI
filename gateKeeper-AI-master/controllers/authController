@@ -1,0 +1,190 @@
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const axios = require("axios");
+const dbOps = require("../dbOperations");
+const { validatePassword } = require("../utils/validators");
+const aiService = require("../services/aiService");
+
+const JWT_SECRET = process.env.JWT_SECRET || "chave_secreta_gatekeeper_ai";
+const AI_SERVICE_URL =
+  process.env.AI_SERVICE_URL || "http://localhost:5000/predict";
+
+function getClientIP(req) {
+  return (
+    req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1"
+  );
+}
+
+async function register(req, res) {
+  const { email, password } = req.body;
+  const ipOrigem = getClientIP(req);
+  const horaDia = new Date().getHours();
+
+  if (!email || !password) {
+    return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
+  }
+
+  const passwordValidation = validatePassword(password);
+  if (!passwordValidation.valid) {
+    return res.status(400).json({ error: passwordValidation.message });
+  }
+
+  try {
+    const existingUser = await dbOps.findUserByEmail(email);
+    if (existingUser) {
+      return res.status(409).json({ error: "Este e-mail já está cadastrado." });
+    }
+
+    const senhaHash = await bcrypt.hash(password, 10);
+    const user = await dbOps.createUser(email, senhaHash);
+
+    await dbOps.createAuditLog({
+      ipOrigem,
+      horaDia,
+      nivelRisco: "Baixo",
+      acaoExecutada: "CADASTRO_SUCESSO",
+      usuarioId: user.id,
+    });
+
+    return res
+      .status(201)
+      .json({ message: "Usuário cadastrado com sucesso.", userId });
+  } catch (error) {
+    console.error("Erro no cadastro:", error);
+    return res
+      .status(500)
+      .json({ error: "Erro interno ao realizar cadastro." });
+  }
+}
+
+async function login(req, res) {
+  const { email, password, codigoPais = 1 } = req.body;
+  const ipOrigem = getClientIP(req);
+  const horaDia = new Date().getHours();
+
+  if (!email || !password) {
+    return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
+  }
+
+  try {
+    const user = await dbOps.findUserByEmail(email);
+
+    if (!user) {
+      //await dbOps.createAuditLog({
+      //  ipOrigem,
+      //  horaDia,
+      //  nivelRisco: 'Alto',
+      //  acaoExecutada: 'LOGIN_FALHA_EMAIL_INEXISTENTE'
+      //});
+      return res.status(401).json({ error: "Credenciais inválidas." });
+    }
+
+    if (user.bloqueado_ate) {
+      const now = new Date();
+      const blockedUntil = new Date(user.bloqueado_ate);
+
+      if (now < blockedUntil) {
+        const remainingMinutes = Math.ceil((blockedUntil - now) / (1000 * 60));
+        await dbOps.createAuditLog({
+          ipOrigem,
+          horaDia,
+          nivelRisco: "Alto",
+          acaoExecutada: "CONTA_BLOQUEADA",
+          usuarioId: user.id,
+        });
+        return res.status(423).json({
+          error: `Conta bloqueada. Tente novamente em ${remainingMinutes} minuto(s).`,
+        });
+      } else {
+        await dbOps.resetUserLock(user.id);
+        user.tentativas_falhas = 0;
+      }
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.senha_hash);
+
+    if (!isPasswordValid) {
+      const newFailedAttempts = (user.tentativas_falhas || 0) + 1;
+
+      if (newFailedAttempts >= 3) {
+        const blockUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        await dbOps.lockUserAccount(user.id, blockUntil);
+
+        await dbOps.createAuditLog({
+          ipOrigem,
+          horaDia,
+          nivelRisco: "Alto",
+          acaoExecutada: "CONTA_BLOQUEADA",
+          usuarioId: user.id,
+        });
+
+        return res.status(423).json({
+          error:
+            "Múltiplas tentativas incorretas. Conta bloqueada por 15 minutos.",
+        });
+      } else {
+        await dbOps.incrementFailedAttempts(user.id, newFailedAttempts);
+
+        await dbOps.createAuditLog({
+          ipOrigem,
+          horaDia,
+          nivelRisco: "Baixo",
+          acaoExecutada: "SENHA_INCORRETA",
+          usuarioId: user.id,
+        });
+
+        return res.status(401).json({
+          error: `Credenciais inválidas. Restam ${3 - newFailedAttempts} tentativa(s).`,
+        });
+      }
+    }
+
+    await dbOps.resetUserLock(user.id);
+
+    // Avaliação do Risco via IA (Busca histórico + Chama Python de forma encapsulada)
+    const nivelRisco = await aiService.evaluateLoginRisk(
+      { horaDia, codigoPais, ipOrigem },
+      user.id,
+    );
+
+    if (nivelRisco === "Alto") {
+      await dbOps.createAuditLog({
+        ipOrigem,
+        horaDia,
+        nivelRisco: "Alto",
+        acaoExecutada: "2FA_SOLICITADO",
+        usuarioId: user.id,
+      });
+
+      return res.status(202).json({
+        status: "PENDING_2FA",
+        message: "Acesso retido. Validação de código 2FA necessária.",
+        userId: user.id,
+      });
+    }
+
+    // Se o risco for baixo, gera o token JWT normalmente
+    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
+      expiresIn: "30m",
+    });
+
+    await dbOps.createAuditLog({
+      ipOrigem,
+      horaDia,
+      nivelRisco: "Baixo",
+      acaoExecutada: "LOGIN_CONCEDIDO",
+      usuarioId: user.id,
+    });
+
+    return res.status(200).json({
+      message: "Login realizado com sucesso.",
+      token,
+      expiresIn: "30m",
+    });
+  } catch (error) {
+    console.error("Erro no login:", error);
+    return res.status(500).json({ error: "Erro interno durante o login." });
+  }
+}
+
+module.exports = { register, login };
